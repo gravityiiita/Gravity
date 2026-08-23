@@ -1,0 +1,18 @@
+name: Test College Server Runner
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: self-hosted
+
+    steps:
+      - name: Test runner
+        run: |
+          echo "Hello from the college server!"
+          hostname
+          pwd
+          whoami
