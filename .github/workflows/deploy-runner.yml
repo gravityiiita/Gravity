@@ -1,0 +1,52 @@
+name: Build and Deploy Gravity
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            gravityiiita/gravity:${{ github.sha }}
+            gravityiiita/gravity:latest
+
+  deploy:
+    name: Deploy on College Server
+    needs: build
+    runs-on: self-hosted
+
+    steps:
+      - name: Pull the new image
+        working-directory: /home/gravity/Website/Update
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: docker compose pull gravity_app
+
+      - name: Deploy the new version
+        working-directory: /home/gravity/Website/Update
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: docker compose up -d --no-deps gravity_app
