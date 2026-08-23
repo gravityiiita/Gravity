@@ -1,0 +1,22 @@
+{
+  "name": "model",
+  "version": "1.0.0",
+  "description": "3D model assets and utilities",
+  "license": "Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "ammo.js": "^0.0.10",
+    "ammojs-typed": "^1.0.6",
+    "cannon": "^0.6.2",
+    "lil-gui": "^0.18.2",
+    "three": "^0.151.3",
+    "three-stdlib": "^2.21.8"
+  },
+  "devDependencies": {
+    "vite": "^4.3.1"
+  }
+}

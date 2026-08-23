@@ -1,4 +1,4 @@
-import type { Wing, Event, Project, BlogPost } from "./types";
+import type { Wing, Event, Project, BlogPost,Member } from "./types";
 import {
   CompetitiveCodingAnimation,
   WebDevelopmentAnimation,
