@@ -287,7 +287,7 @@ export default function AboutPage() {
               />
             </h1>
             <p className="text-lg text-foreground/60 max-w-xl mx-auto">
-              A technical society uniting five wings of innovation
+              A technicalito society uniting five wings of innovation
               under one roof.
             </p>
           </div>
