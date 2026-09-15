@@ -787,7 +787,8 @@ function ParticleCanvas({
   const aspect = width / Math.max(height, 1);
   const zForHeight = PARTICLE_IMG_SIZE / 2 / Math.tan(fovRad / 2);
   const zForWidth = PARTICLE_IMG_SIZE / 2 / (Math.tan(fovRad / 2) * aspect);
-  const cameraZ = Math.max(zForHeight, zForWidth) * 1.08;
+  // Pull camera back slightly for optimal sizing
+  const cameraZ = Math.max(zForHeight, zForWidth) * 1.15;
 
   const cameraProps = {
     fov: FOV,
@@ -799,11 +800,10 @@ function ParticleCanvas({
   return (
     <div
       style={{
-        width,
-        height,
+        width: "100%",
+        height: "100%",
         display: "flex",
         position: "relative",
-        flexShrink: 0,
         borderRadius: 16,
         overflow: "hidden",
       }}
@@ -1092,12 +1092,13 @@ function ParticleViewport({
       ref={containerRef}
       style={{
         position: "relative",
-        width: "100%",
-        height: "100%",
+        width: 480,
+        height: 480,
         borderRadius: 16,
         overflow: "hidden",
         border: "1px solid rgba(255,255,255,0.06)",
         background: "rgba(0,0,0,0.35)",
+        flexShrink: 0,
       }}
     >
       <AmbientParticles width={size.w} height={size.h} />
@@ -1208,7 +1209,11 @@ function ParticleViewport({
         }}
       >
         {size.w > 0 && size.h > 36 && (
-          <ParticleCanvas src={activeSrc} width={size.w} height={size.h - 36} />
+          <ParticleCanvas
+            src={activeSrc}
+            width={Math.max(size.w - 100, 100)}
+            height={Math.max(size.h - 156, 100)}
+          />
         )}
       </div>
     </div>
@@ -1412,17 +1417,9 @@ export function PrivateAIMembersPage() {
     );
   }
 
-  // ── Desktop layout: full-viewport split pane, no page scroll ────────────
+  // ── Desktop layout: full-viewport split pane, footer below fold ──────────
   return (
-    <div
-      style={{
-        position: "relative",
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        background: "rgba(4,4,12,0.97)",
-      }}
-    >
+    <div style={{ position: "relative", background: "rgba(4,4,12,0.97)" }}>
       <style>{NEURAL_CSS}</style>
 
       {/* Page-level neural lattice — behind everything */}
@@ -1431,21 +1428,22 @@ export function PrivateAIMembersPage() {
       {/* Navigation renders itself as position:fixed — just render it */}
       <Navigation />
 
-      <main
+      {/* ── Main viewport section (exactly 100vh) ── */}
+      <div
         style={{
-          flex: 1,
+          height: "100vh",
           display: "flex",
           flexDirection: "column",
-          padding: "20px 0 0",
-          marginTop: 68,
-          height: "calc(100vh - 68px)",
           overflow: "hidden",
         }}
       >
+        {/* Spacer for fixed nav */}
+        <div style={{ flexShrink: 0, height: 68 }} />
+
         {/* Stealth Heading Section */}
         <div
           className="stealth-heading-container"
-          style={{ marginBottom: 60, flexShrink: 0 }}
+          style={{ flexShrink: 0, paddingTop: 20, marginBottom: 20 }}
         >
           <div
             style={{
@@ -1480,7 +1478,7 @@ export function PrivateAIMembersPage() {
           </div>
         </div>
 
-        {/* Main split pane */}
+        {/* Main split pane — takes ALL remaining vertical space */}
         <div
           style={{
             flex: 1,
@@ -1489,14 +1487,14 @@ export function PrivateAIMembersPage() {
             overflow: "hidden",
             padding: "0 24px 20px",
             gap: 24,
+            minHeight: 0,
           }}
         >
           {/* ── LEFT COLUMN: Members list ─────────────────────────────── */}
           <div
             style={{
-              flex: "1 1 0",
+              flex: "0 0 40%",
               minWidth: 0,
-              maxWidth: "50%",
               display: "flex",
               flexDirection: "column",
               overflow: "hidden",
@@ -1590,15 +1588,16 @@ export function PrivateAIMembersPage() {
           </div>
 
           {/* ── RIGHT COLUMN: Focus Area ─────────────────────────────── */}
-          <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+          <div style={{ flex: "1 1 60%", minWidth: 0, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <ParticleViewport
               activeSrc={activeSrc}
               activeMember={activeMember}
             />
           </div>
         </div>
-      </main>
+      </div>
 
+      {/* Footer below the fold — scroll to see it */}
       <Footer />
     </div>
   );
