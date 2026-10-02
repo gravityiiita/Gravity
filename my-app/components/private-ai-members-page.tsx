@@ -715,6 +715,7 @@ function ParticleSystem({
       <instancedMesh
         ref={instanceMeshRef}
         args={[null as any, null as any, dots]}
+        frustumCulled={false}
       >
         <planeGeometry args={[2.0, 2.0, 1, 1]}>
           <instancedBufferAttribute
@@ -736,7 +737,10 @@ function ParticleSystem({
         />
       </instancedMesh>
       {/* Invisible plane for catching mouse rays */}
-      <mesh onPointerMove={({ uv }) => addTouch({ x: uv!.x, y: uv!.y })}>
+      <mesh
+        frustumCulled={false}
+        onPointerMove={({ uv }) => addTouch({ x: uv!.x, y: uv!.y })}
+      >
         <planeGeometry args={[PARTICLE_IMG_SIZE * 2, PARTICLE_IMG_SIZE * 2]} />
         <meshBasicMaterial attach="material" transparent={true} opacity={0.0} />
       </mesh>
