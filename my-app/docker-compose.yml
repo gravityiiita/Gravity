@@ -14,6 +14,9 @@ services:
   # 2. Your Gravity (Next.js) App
   gravity_app: 
 
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: akshatga/gravity:0.0.0.RELEASE 
     
 
