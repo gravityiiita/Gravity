@@ -10,14 +10,11 @@ FROM base AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-COPY package.json package-lock.json* yarn.lock* pnpm-lock.yaml* ./
+COPY package.json package-lock.json ./
 
-RUN \
-  if [ -f yarn.lock ]; then yarn --frozen-lockfile; \
-  elif [ -f package-lock.json ]; then npm ci; \
-  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm i --frozen-lockfile; \
-  else npm install; \
-  fi
+# package-lock.json must be in git. Without it, CI falls through to `npm install`
+# and floats next/react (16.3.8 / 19.3) while local Docker uses npm ci (16.1.4 / 19.2.3).
+RUN npm ci
 
 # Stage 2: Build the Next.js app
 FROM base AS builder
@@ -28,12 +25,7 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN \
-  if [ -f yarn.lock ]; then yarn run build; \
-  elif [ -f package-lock.json ]; then npm run build; \
-  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm run build; \
-  else npm run build; \
-  fi
+RUN npm run build
 
 # Stage 3: Production image (Next.js standalone)
 FROM base AS runner
