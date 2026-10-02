@@ -11,6 +11,7 @@ import {
   CheckCircle,
   Loader2,
   Send,
+  XCircle,
   User,
   AtSign,
   AlignLeft,
@@ -21,12 +22,19 @@ import {
 } from "lucide-react";
 import MagicButton from "@/components/magic-button";
 
-const nextFrame = () =>
-  new Promise<void>((resolve) =>
-    typeof window === "undefined"
-      ? resolve()
-      : requestAnimationFrame(() => resolve()),
-  );
+type StageKey = "processing" | "validating" | "moderating" | "checkingEmail" | "sending";
+
+const stageOrder: Record<StageKey, number> = {
+  processing: 0,
+  validating: 1,
+  moderating: 2,
+  checkingEmail: 3,
+  sending: 4,
+};
+
+const MIN_STEP_MS = 450;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export default function ContactPage() {
   const [formData, setFormData] = useState({
@@ -37,41 +45,31 @@ export default function ContactPage() {
   const [submitted, setSubmitted] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  type Step =
-    | "idle"
-    | "validating"
-    | "moderating"
-    | "checkingEmail"
-    | "sending"
-    | "done"
-    | "error";
+  type Step = "idle" | StageKey | "done" | "error";
   const [step, setStep] = useState<Step>("idle");
+  const [failedStep, setFailedStep] = useState<StageKey | null>(null);
 
-  const stageOrder: Record<Exclude<Step, "idle">, number> = {
-    validating: 0,
-    moderating: 1,
-    checkingEmail: 2,
-    sending: 3,
-    done: 4,
-    error: 4,
-  };
-
-  const stages: {
-    key: Exclude<Step, "idle" | "done" | "error">;
-    label: string;
-  }[] = [
+  const stages: { key: StageKey; label: string }[] = [
+    { key: "processing", label: "Processing your request" },
     { key: "validating", label: "Verifying your message details" },
     { key: "moderating", label: "Checking with reviewer for appropriateness" },
     { key: "checkingEmail", label: "Verifying email deliverability" },
     { key: "sending", label: "Sending email" },
   ];
 
-  const stageState = (target: (typeof stages)[number]["key"]) => {
+  const stageState = (target: StageKey) => {
     if (step === "idle") return "pending";
-    const current = stageOrder[step as Exclude<Step, "idle">];
-    const idx = stageOrder[target];
+    if (failedStep) {
+      const failIdx = stageOrder[failedStep];
+      const idx = stageOrder[target];
+      if (idx < failIdx) return "done";
+      if (idx === failIdx) return "error";
+      return "pending";
+    }
     if (step === "done") return "done";
-    if (step === "error") return idx < current ? "done" : "pending";
+    if (step === "error") return "pending";
+    const current = stageOrder[step];
+    const idx = stageOrder[target];
     if (current > idx) return "done";
     if (current === idx) return "active";
     return "pending";
@@ -86,29 +84,87 @@ export default function ContactPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (sending) return;
     setError(null);
+    setFailedStep(null);
+    setSubmitted(false);
     setSending(true);
-    setStep("validating");
+    setStep("processing");
+
+    let shownAt = Date.now();
+    let failure: StageKey | null = null;
+
+    const showStep = async (next: StageKey | "done") => {
+      const elapsed = Date.now() - shownAt;
+      if (elapsed < MIN_STEP_MS) await wait(MIN_STEP_MS - elapsed);
+      setStep(next);
+      shownAt = Date.now();
+    };
+
     try {
-      setStep("moderating");
-      await nextFrame();
-      setStep("checkingEmail");
-      await nextFrame();
       const res = await fetch("/api/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
       });
-      setStep("sending");
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
+
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        failure = "processing";
         throw new Error(data?.error || "Failed to send message");
       }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finished = false;
+
+      const handleEvent = async (event: {
+        step?: StageKey | "done";
+        status?: "active" | "error" | "done";
+        ok?: boolean;
+        error?: string;
+      }) => {
+        if (event.status === "active" && event.step && event.step !== "done") {
+          await showStep(event.step);
+          return;
+        }
+        if (event.status === "error") {
+          const failed = event.step && event.step !== "done" ? event.step : "sending";
+          failure = failed;
+          setFailedStep(failed);
+          setStep("error");
+          throw new Error(event.error || "Failed to send message");
+        }
+        if (event.ok || event.step === "done") {
+          await showStep("done");
+          finished = true;
+        }
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          await handleEvent(JSON.parse(trimmed));
+        }
+      }
+
+      if (buffer.trim()) await handleEvent(JSON.parse(buffer.trim()));
+      if (!finished) throw new Error("Connection closed before the message was sent");
+
+      await wait(600);
       setSubmitted(true);
       setFormData({ name: "", email: "", message: "" });
-      setStep("done");
+      setStep("idle");
       setTimeout(() => setSubmitted(false), 4000);
     } catch (err: any) {
+      if (!failure) setFailedStep((current) => current ?? "processing");
       setError(err?.message || "Network error");
       setStep("error");
     } finally {
@@ -331,6 +387,7 @@ export default function ContactPage() {
                     type="submit"
                     className="w-full"
                     heightClass="h-12"
+                    disabled={sending}
                   >
                     {sending
                       ? "Sending\u2026"
@@ -340,12 +397,8 @@ export default function ContactPage() {
                   </MagicButton>
 
                   {/* Progress stages */}
-                  {sending && (
-                    <div className="p-4 rounded-xl bg-white/4 border border-white/8 text-sm space-y-2">
-                      <div className="flex items-center gap-2 text-foreground/60 text-xs">
-                        <div className="w-3.5 h-3.5 border-2 border-foreground/20 border-t-purple-400 rounded-full animate-spin" />
-                        Processing your request
-                      </div>
+                  {(sending || step === "error") && (
+                    <div className="p-4 rounded-xl bg-white/4 border border-white/8 text-sm">
                       <div className="space-y-1.5">
                         {stages.map((s) => {
                           const state = stageState(s.key);
@@ -359,6 +412,11 @@ export default function ContactPage() {
                                   size={13}
                                   className="text-green-400 shrink-0"
                                 />
+                              ) : state === "error" ? (
+                                <XCircle
+                                  size={13}
+                                  className="text-red-400 shrink-0"
+                                />
                               ) : state === "active" ? (
                                 <Loader2
                                   size={13}
@@ -371,9 +429,11 @@ export default function ContactPage() {
                                 className={
                                   state === "active"
                                     ? "text-foreground/90"
-                                    : state === "done"
-                                      ? "text-foreground/50"
-                                      : "text-foreground/30"
+                                    : state === "error"
+                                      ? "text-red-300"
+                                      : state === "done"
+                                        ? "text-foreground/50"
+                                        : "text-foreground/30"
                                 }
                               >
                                 {s.label}

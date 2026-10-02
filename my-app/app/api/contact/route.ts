@@ -1,6 +1,5 @@
-import { NextResponse } from "next/server"
 import nodemailer from "nodemailer"
-import OpenAI from "openai"
+import { geminiApiKey, generateWithGemini } from "@/lib/gemini"
 
 export const runtime = "nodejs"
 
@@ -36,84 +35,123 @@ Rules:
 - "sanitized_message" must remove links, phone numbers, and emails not in the original sender field, while keeping the useful body text. If nothing needs sanitizing, return the original message.
 - NEVER return code fences or extra text. Output JSON only.`
 
+type ProgressEvent = {
+  step: "validating" | "moderating" | "checkingEmail" | "sending" | "done"
+  status: "active" | "error" | "done"
+  ok?: boolean
+  error?: string
+  id?: string
+}
+
 export async function POST(request: Request) {
   const { name, email, message } = await request.json().catch(() => ({ name: "", email: "", message: "" }))
 
-  if (!name || !email || !message) {
-    return NextResponse.json({ ok: false, error: "Missing name, email or message" }, { status: 400 })
-  }
-  const [moderationResult, deliverabilityResult] = await Promise.allSettled([
-    runModeration({ name, email, message }),
-    checkEmailDeliverability(email),
-  ])
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream({
+    async start(controller) {
+      let closed = false
+      const send = (event: ProgressEvent) => {
+        if (closed) return
+        controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`))
+      }
+      const fail = (step: ProgressEvent["step"], error: string) => {
+        send({ step, status: "error", ok: false, error })
+      }
 
-  const moderation =
-    moderationResult.status === "fulfilled"
-      ? moderationResult.value
-      : {
-          approved: false,
-          verdict: "reject" as const,
-          reason: moderationResult.reason?.message || "Moderation failed",
-          issues: ["LLM moderation call failed"],
-          sanitized_message: message,
+      try {
+        send({ step: "validating", status: "active" })
+        const trimmedName = String(name || "").trim()
+        const trimmedEmail = String(email || "").trim()
+        const trimmedMessage = String(message || "").trim()
+        if (!trimmedName || !trimmedEmail || !trimmedMessage) {
+          fail("validating", "Missing name, email or message")
+          return
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+          fail("validating", "Please enter a valid email address")
+          return
         }
 
-  const deliver =
-    deliverabilityResult.status === "fulfilled"
-      ? deliverabilityResult.value
-      : {
-          ok: false,
-          reason: deliverabilityResult.reason?.message || "Email verification failed",
-          issues: ["Email verification failed"],
+        send({ step: "moderating", status: "active" })
+        let moderation: ModerationVerdict
+        try {
+          moderation = await runModeration({ name: trimmedName, email: trimmedEmail, message: trimmedMessage })
+        } catch (err: any) {
+          fail("moderating", err?.message || "Moderation failed")
+          return
+        }
+        if (!moderation.approved) {
+          fail("moderating", moderation.reason || "Message rejected by safety filter")
+          return
         }
 
-  if (!deliver.ok) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: deliver.reason || "Email could not be verified",
-        issues: deliver.issues || [],
-      },
-      { status: 400 },
-    )
-  }
+        send({ step: "checkingEmail", status: "active" })
+        let deliver: DeliverabilityResult
+        try {
+          deliver = await checkEmailDeliverability(trimmedEmail)
+        } catch (err: any) {
+          fail("checkingEmail", err?.message || "Email verification failed")
+          return
+        }
+        if (!deliver.ok) {
+          fail("checkingEmail", deliver.reason || "Email could not be verified")
+          return
+        }
 
-  if (!moderation.approved) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: moderation.reason || "Message rejected by safety filter",
-        issues: moderation.issues || [],
-      },
-      { status: 400 },
-    )
-  }
+        const safeMessage = moderation.sanitized_message?.trim() || trimmedMessage
+        send({ step: "sending", status: "active" })
+        try {
+          const id = await sendContactEmail({
+            name: trimmedName,
+            email: trimmedEmail,
+            message: safeMessage,
+          })
+          send({ step: "done", status: "done", ok: true, id })
+        } catch (err: any) {
+          console.error("Contact email send failed", err)
+          fail("sending", err?.message || "Failed to send")
+        }
+      } catch (err: any) {
+        console.error("Contact request failed", err)
+        fail("sending", err?.message || "Failed to send")
+      } finally {
+        closed = true
+        controller.close()
+      }
+    },
+  })
 
-  const safeMessage = moderation.sanitized_message?.trim() || message
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+    },
+  })
+}
 
+async function sendContactEmail(payload: { name: string; email: string; message: string }) {
   const host = process.env.CONTACT_SMTP_HOST || process.env.SMTP_HOST || "smtp.gmail.com"
   const port = Number(process.env.CONTACT_SMTP_PORT || process.env.SMTP_PORT || 587)
   const user = process.env.CONTACT_SMTP_USER || process.env.SMTP_USER
   const pass = process.env.CONTACT_SMTP_PASS || process.env.SMTP_PASS
   const to = process.env.CONTACT_TO || "raghavvohra375@gmail.com"
   const from = process.env.CONTACT_FROM || `Gravity Contact <${user}>`
-  const secure = (process.env.CONTACT_SMTP_SECURE || process.env.SMTP_SECURE) === "true" || port === 465
 
   if (!user || !pass) {
-    return NextResponse.json({ ok: false, error: "SMTP user/pass not configured" }, { status: 500 })
+    throw new Error("SMTP user/pass not configured")
   }
 
-  // Ensure credentials are trimmed and clean
   const cleanUser = user.trim()
   const cleanPass = pass.trim()
 
   const transporter = nodemailer.createTransport({
     host,
     port,
-    secure: false, // false for port 587, true for 465
-    auth: { 
-      user: cleanUser, 
-      pass: cleanPass 
+    secure: false,
+    auth: {
+      user: cleanUser,
+      pass: cleanPass,
     },
   })
 
@@ -121,13 +159,12 @@ export async function POST(request: Request) {
     await transporter.verify()
   } catch (err: any) {
     console.error("Contact SMTP verify failed - Full error:", err)
-    return NextResponse.json({ 
-      ok: false, 
-      error: `SMTP Authentication Failed: Check your email credentials or app password. Error: ${err?.message || "Unknown error"}` 
-    }, { status: 500 })
+    throw new Error(
+      `SMTP Authentication Failed: Check your email credentials or app password. Error: ${err?.message || "Unknown error"}`,
+    )
   }
 
-  const subject = `New Contact Form Submission from ${name}`
+  const subject = `New Contact Form Submission from ${payload.name}`
   const html = `
   <div style="
     font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
@@ -156,11 +193,11 @@ export async function POST(request: Request) {
       </h2>
 
       <p style="margin:6px 0;color:#374151">
-        <strong style="color:#111">Name:</strong> ${escapeHtml(name)}
+        <strong style="color:#111">Name:</strong> ${escapeHtml(payload.name)}
       </p>
 
       <p style="margin:6px 0;color:#374151">
-        <strong style="color:#111">Email:</strong> ${escapeHtml(email)}
+        <strong style="color:#111">Email:</strong> ${escapeHtml(payload.email)}
       </p>
 
       <p style="margin:12px 0 6px;color:#111">
@@ -174,7 +211,7 @@ export async function POST(request: Request) {
         border-left:4px solid #2563eb;
         color:#1f2937;
       ">
-        ${escapeHtml(safeMessage)}
+        ${escapeHtml(payload.message)}
       </div>
 
       <p style="
@@ -188,16 +225,16 @@ export async function POST(request: Request) {
     </div>
 
   </div>
-`;
+`
 
-
-  try {
-    const info = await transporter.sendMail({ from, to, subject, html, replyTo: email })
-    return NextResponse.json({ ok: true, id: info.messageId })
-  } catch (err: any) {
-    console.error("Contact email send failed", err)
-    return NextResponse.json({ ok: false, error: err?.message || "Failed to send" }, { status: 500 })
-  }
+  const info = await transporter.sendMail({
+    from,
+    to,
+    subject,
+    html,
+    replyTo: payload.email,
+  })
+  return info.messageId
 }
 
 function escapeHtml(str: string) {
@@ -210,23 +247,16 @@ function escapeHtml(str: string) {
 }
 
 async function runModeration(payload: { name: string; email: string; message: string }): Promise<ModerationVerdict> {
-  const apiKey = process.env.NVIDIA_API_KEY || process.env.NVIDIA_NIM_API_KEY || process.env.OPENAI_API_KEY
-
-  if (!apiKey) {
+  if (!geminiApiKey()) {
     console.warn("[contact] moderation skipped - missing API key")
     return {
       approved: false,
       verdict: "reject",
       reason: "Moderation service not configured",
-      issues: ["Missing LLM API key"],
+      issues: ["Missing GEMINI_API_KEY"],
       sanitized_message: payload.message,
     }
   }
-
-  const client = new OpenAI({
-    apiKey,
-    baseURL: process.env.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1",
-  })
 
   const userContent = JSON.stringify({
     sender_name: payload.name,
@@ -236,19 +266,12 @@ async function runModeration(payload: { name: string; email: string; message: st
 
   let raw = ""
   try {
-    const completion = await client.chat.completions.create({
-      model: process.env.NVIDIA_MODEL || "mistralai/devstral-2-123b-instruct-2512",
-      messages: [
-        { role: "system", content: MODERATION_SYSTEM_PROMPT },
-        { role: "user", content: userContent },
-      ],
-      temperature: 0,
-      top_p: 0.9,
-      max_tokens: 512,
-      stream: false,
+    raw = await generateWithGemini({
+      system: MODERATION_SYSTEM_PROMPT,
+      user: userContent,
+      maxOutputTokens: 1024,
+      json: true,
     })
-
-    raw = completion.choices?.[0]?.message?.content?.trim() || ""
   } catch (err) {
     console.error("[contact] moderation call failed", err)
     return {

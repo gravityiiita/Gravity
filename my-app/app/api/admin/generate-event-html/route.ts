@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
+import { generateWithGemini, geminiApiKey } from "@/lib/gemini";
 
 export const runtime = "nodejs";
 
@@ -179,39 +179,19 @@ export async function POST(request: Request) {
     );
   }
 
-  const apiKey =
-    process.env.NVIDIA_API_KEY ||
-    process.env.NVIDIA_NIM_API_KEY ||
-    process.env.OPENAI_API_KEY;
-
-  if (!apiKey) {
+  if (!geminiApiKey()) {
     return NextResponse.json(
-      { ok: false, error: "NVIDIA_API_KEY is not configured" },
+      { ok: false, error: "GEMINI_API_KEY is not configured" },
       { status: 500 },
     );
   }
 
-  const openai = new OpenAI({
-    apiKey,
-    baseURL:
-      process.env.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1",
-  });
-
   try {
-    const completion = await openai.chat.completions.create({
-      model:
-        process.env.NVIDIA_MODEL || "mistralai/devstral-2-123b-instruct-2512",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: text },
-      ],
-      temperature: 0.15,
-      top_p: 0.95,
-      max_tokens: 4096,
-      stream: false,
+    const html = await generateWithGemini({
+      system: SYSTEM_PROMPT,
+      user: text,
+      maxOutputTokens: 4096,
     });
-
-    const html = completion.choices?.[0]?.message?.content?.trim() || "";
 
     if (!html) {
       return NextResponse.json(
