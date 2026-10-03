@@ -15,9 +15,10 @@ const MemberSchema = new Schema(
     isOverallCoordinator: { type: Boolean, default: false },
     isFacultyCoordinator: { type: Boolean, default: false },
     socials: {
-      github: { type: String },
-      linkedin: { type: String },
-      twitter: { type: String },
+      github: { type: String, default: '' },
+      linkedin: { type: String, default: '' },
+      twitter: { type: String, default: '' },
+      instagram: { type: String, default: '' },
     },
   },
   {
@@ -39,6 +40,11 @@ const MemberSchema = new Schema(
 MemberSchema.virtual('id').get(function (this: any) {
   return this._id.toString()
 })
+
+// Next keeps the compiled model across reloads. Rebuild it when socials.instagram is missing.
+if (models.Member && !models.Member.schema.path('socials.instagram')) {
+  mongoose.deleteModel('Member')
+}
 
 export const Member = models.Member || model('Member', MemberSchema)
 export type MemberDoc = mongoose.InferSchemaType<typeof MemberSchema> & { id: string }

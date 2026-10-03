@@ -24,6 +24,12 @@ export function MemberForm({ member, onSubmit, onCancel }: MemberFormProps) {
     image: string
     isOverallCoordinator: boolean
     isFacultyCoordinator: boolean
+    socials: {
+      github: string
+      linkedin: string
+      twitter: string
+      instagram: string
+    }
   }>({
     name: member?.name || "",
     role: member?.role || "member",
@@ -32,11 +38,25 @@ export function MemberForm({ member, onSubmit, onCancel }: MemberFormProps) {
     image: member?.image || "",
     isOverallCoordinator: member?.isOverallCoordinator || false,
     isFacultyCoordinator: member?.isFacultyCoordinator || false,
+    socials: {
+      github: member?.socials?.github || "",
+      linkedin: member?.socials?.linkedin || "",
+      twitter: member?.socials?.twitter || "",
+      instagram: member?.socials?.instagram || "",
+    },
   })
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
+  }
+
+  const handleSocialChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target
+    setFormData((prev) => ({
+      ...prev,
+      socials: { ...prev.socials, [name]: value },
+    }))
   }
 
   const [uploading, setUploading] = useState(false)
@@ -177,7 +197,16 @@ export function MemberForm({ member, onSubmit, onCancel }: MemberFormProps) {
     e.preventDefault()
     setIsSubmitting(true)
     setSubmitError("")
-    const payload = { ...member, ...formData }
+    const payload = {
+      ...member,
+      ...formData,
+      socials: {
+        github: formData.socials.github.trim(),
+        linkedin: formData.socials.linkedin.trim(),
+        twitter: formData.socials.twitter.trim(),
+        instagram: formData.socials.instagram.trim(),
+      },
+    }
     if (!payload.image) {
       payload.image = '/gravity-logo.png'
     }
@@ -296,6 +325,44 @@ export function MemberForm({ member, onSubmit, onCancel }: MemberFormProps) {
           className="w-full px-4 py-2 rounded-lg bg-card border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
           placeholder="Enter member bio"
         />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium mb-2">Social Links</label>
+        <div className="grid md:grid-cols-2 gap-3">
+          <input
+            type="text"
+            name="linkedin"
+            value={formData.socials.linkedin}
+            onChange={handleSocialChange}
+            placeholder="LinkedIn URL"
+            className="w-full px-4 py-2 rounded-lg bg-card border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+          <input
+            type="text"
+            name="github"
+            value={formData.socials.github}
+            onChange={handleSocialChange}
+            placeholder="GitHub URL"
+            className="w-full px-4 py-2 rounded-lg bg-card border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+          <input
+            type="text"
+            name="twitter"
+            value={formData.socials.twitter}
+            onChange={handleSocialChange}
+            placeholder="X / Twitter URL"
+            className="w-full px-4 py-2 rounded-lg bg-card border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+          <input
+            type="text"
+            name="instagram"
+            value={formData.socials.instagram}
+            onChange={handleSocialChange}
+            placeholder="Instagram URL"
+            className="w-full px-4 py-2 rounded-lg bg-card border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </div>
       </div>
 
       <div>

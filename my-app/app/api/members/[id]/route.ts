@@ -30,10 +30,19 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   delete payload._id
   delete payload.createdAt
   delete payload.updatedAt
+  if (payload.socials && typeof payload.socials === "object") {
+    payload.socials = {
+      github: String(payload.socials.github || "").trim(),
+      linkedin: String(payload.socials.linkedin || "").trim(),
+      twitter: String(payload.socials.twitter || "").trim(),
+      instagram: String(payload.socials.instagram || "").trim(),
+    }
+  }
   await connectToDatabase()
   const updated = await Member.findById(id)
   if (!updated) return NextResponse.json({ error: "Member not found" }, { status: 404 })
   updated.set(payload)
+  if (payload.socials) updated.markModified("socials")
   await updated.save()
   return NextResponse.json(updated)
 }

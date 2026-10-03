@@ -37,6 +37,14 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!requireAuth(request)) return unauthorized()
   const payload = await request.json().catch(() => ({}))
+  if (payload.socials && typeof payload.socials === "object") {
+    payload.socials = {
+      github: String(payload.socials.github || "").trim(),
+      linkedin: String(payload.socials.linkedin || "").trim(),
+      twitter: String(payload.socials.twitter || "").trim(),
+      instagram: String(payload.socials.instagram || "").trim(),
+    }
+  }
   await connectToDatabase()
   const created = await Member.create(payload)
   return NextResponse.json(created, { status: 201 })
